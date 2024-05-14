@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic Tac Toe</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-template-rows: repeat(3, 100px);
+            gap: 10px;
+        }
+
+        .cell {
+            width: 100px;
+            height: 100px;
+            border: 2px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3em;
+            cursor: pointer;
+        }
+
+        .cell:hover {
+            background-color: #ddd;
+        }
+
+        .cell.x {
+            color: blue;
+        }
+
+        .cell.o {
+            color: red;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 1.2em;
+        }
+
+        #connection-status {
+            margin-top: 10px;
+            font-size: 1em;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tic Tac Toe</h1>
+
+    <div id="game-container">
+        <div id="connection-status">Connecting...</div>
+        <div id="game-board"></div>
+        <div id="status">Player X's turn</div>
+        <button id="reset-button" onclick="resetGame()">Reset Game</button>
+    </div>
+    <pre id="debug-console"></pre>
+    <script>
+       let socket;
+        let yourTurn = false;
+        let gameBoard = ['', '', '', '', '', '', '', '', ''];
+        let currentPlayer = 'x';
+        const cells = document.querySelectorAll('.cell');
+        const status = document.getElementById('status');
+        const connectionStatus = document.getElementById('connection-status');
+        const debugConsole = document.getElementById('debug-console');
+
+        // Log to debug console
+        function logToDebugConsole(message, data = null) {
+            debugConsole.textContent += `\n${message}${data ? `: ${JSON.stringify(data, null, 2)}` : ''}`;
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+        }
+        // Initialize the WebSocket connection
+        function connectToWebSocket() {
+            socket = new WebSocket('ws://localhost:8080');
+            
+            socket.addEventListener('open', (event) => {
+                logToDebugConsole('WebSocket connected');
+                document.getElementById('connection-status').textContent = 'Connected!';
+            });
+            
+            socket.addEventListener('message', handleServerMessage);
+            
+            socket.addEventListener('error', (error) => {
+                logToDebugConsole('WebSocket error', error);
+                document.getElementById('connection-status').textContent = 'Error!';
+            });
+            
+            socket.addEventListener('close', () => {
+                logToDebugConsole('WebSocket disconnected');
+                document.getElementById('connection-status').textContent = 'Disconnected';
+            });
+        }
+
+       // Handle incoming messages from the server
+       function handleServerMessage(event) {
+            const data = JSON.parse(event.data);
+            logToDebugConsole('Received message', data);
+
+            if (data.type === 'move') {
+                // Update the game board with the other player's move
+                gameBoard[data.index] = data.player;
+                updateBoard();
+                yourTurn = true; // After receiving a move, it's your turn again
+                status.textContent = `Player ${currentPlayer}'s turn`;
+            } else if (data.type === 'start') {
+                // If the server signals the start, it's your turn
+                yourTurn = true;
+                status.textContent = `Player ${currentPlayer}'s turn`;
+            } else if (data.type === 'reset') {
+                resetGame();
+            }
+        }
+
+           // Send moves to the server
+           function sendMove(index) {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'move', index, player: currentPlayer }));
+                logToDebugConsole('Sent move', { index, player: currentPlayer });
+            } else {
+                logToDebugConsole('WebSocket not ready to send move');
+            }
+        }
+
+           // Reset game and notify the server
+           function resetGame() {
+            gameBoard = ['', '', '', '', '', '', '', '', ''];
+            currentPlayer = 'x';
+            yourTurn = true; // Reset turn to player X
+            updateBoard();
+            status.textContent = 'Player X\'s turn';
+            cells.forEach(cell => cell.addEventListener('click', handleCellClick));
+            sendSignal({ type: 'reset' });
+            logToDebugConsole('Game reset');
+        }
+
+        // Set up game board
+        function createBoard() {
+            const board = document.getElementById('game-board');
+            for (let i = 0; i < 9; i++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                cell.dataset.index = i;
+                cell.addEventListener('click', handleCellClick);
+                board.appendChild(cell);
+            }
+        }
+
+        // Handle cell click
+         // Handle cell click
+         function handleCellClick(event) {
+            console.log('Cell clicked:', event.target.dataset.index);
+            if (!yourTurn) return; // Only allow a click if it's your turn
+            const index = event.target.dataset.index;
+            if (gameBoard[index] === '') {
+                gameBoard[index] = currentPlayer;
+                updateBoard();
+                yourTurn = false; // After making a move, it's not your turn
+                status.textContent = 'Waiting for other player...';
+                sendMove(index);
+                currentPlayer = currentPlayer === 'x' ? 'o' : 'x';
+            }
+        }
+
+        // Update game board display
+        function updateBoard() {
+            cells.forEach((cell, index) => {
+                cell.textContent = gameBoard[index];
+                cell.classList.remove('x', 'o');
+                if (gameBoard[index] === 'x') {
+                    cell.classList.add('x');
+                } else if (gameBoard[index] === 'o') {
+                    cell.classList.add('o');
+                }
+            });
+
+            // Check for winner or tie
+            const winner = checkWinner();
+            if (winner) {
+                status.textContent = `Player ${winner} wins!`;
+                cells.forEach(cell => cell.removeEventListener('click', handleCellClick));
+            } else if (gameBoard.every(cell => cell !== '')) {
+                status.textContent = 'It\'s a tie!';
+            }
+        }
+
+        // Check for winning combinations
+        function checkWinner() {
+            const winningCombinations = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                [0, 4, 8], [2, 4, 6]
+            ];
+
+            for (const combination of winningCombinations) {
+                const [a, b, c] = combination;
+                if (gameBoard[a] && gameBoard[a] === gameBoard[b] && gameBoard[a] === gameBoard[c]) {
+                    return gameBoard[a];
+                }
+            }
+
+            return null;
+        }
+
+        // Reset game
+        function resetGame() {
+            gameBoard = ['', '', '', '', '', '', '', '', ''];
+            currentPlayer = 'x';
+            yourTurn = false; // Set yourTurn to false initially
+            updateBoard();
+            status.textContent = 'Player X\'s turn';
+            cells.forEach(cell => cell.addEventListener('click', handleCellClick));
+            sendSignal({ type: 'reset' });
+        }
+
+        window.onload = () => {
+            connectToWebSocket();
+            createBoard();
+        };
+        
+    </script>
+</body>
+</html>
